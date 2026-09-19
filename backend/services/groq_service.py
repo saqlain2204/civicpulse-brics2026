@@ -13,7 +13,7 @@ from services.cache import (
 
 # Explicit timeout + bounded pool — prevents hanging forever in serverless
 _http = httpx.Client(
-    timeout=httpx.Timeout(total=25.0, connect=8.0, read=20.0, write=8.0),
+    timeout=httpx.Timeout(25.0, connect=8.0, read=20.0, write=8.0),
     limits=httpx.Limits(max_connections=10, max_keepalive_connections=3),
 )
 
