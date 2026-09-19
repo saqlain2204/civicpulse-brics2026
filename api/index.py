@@ -1,5 +1,6 @@
 """
 Vercel Python serverless entry point.
+handler must be a module-level name so Vercel's static analyser can find it.
 """
 import sys
 import os
@@ -9,28 +10,31 @@ import traceback
 _here = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.abspath(os.path.join(_here, '..', 'backend')))
 
+# ── Try importing the real app ────────────────────────────────────────────
+_import_error = None
+_app = None
+
 try:
-    from mangum import Mangum
-    from main import app
-
-    # lifespan="off" — DB connects lazily on first get_db() call.
-    # Avoids running the full startup sequence (connect + seed) on every
-    # cold start, which was causing FUNCTION_INVOCATION_FAILED timeouts.
-    handler = Mangum(app, lifespan="off", api_gateway_base_path="/api")
-
+    from main import app as _real_app   # backend/main.py
+    _app = _real_app
 except Exception:
-    # Surface any import error as a readable JSON 500 instead of
-    # a cryptic FUNCTION_INVOCATION_FAILED so we can debug faster.
-    import json
-    _tb = traceback.format_exc()
-    print("CIVICPULSE IMPORT ERROR:\n", _tb)
+    _import_error = traceback.format_exc()
+    print("[CivicPulse] import error:\n", _import_error)
 
-    from fastapi import FastAPI
-    _fallback = FastAPI()
+# ── Build the handler that Vercel looks for at module scope ───────────────
+from mangum import Mangum   # always available (in requirements.txt)
+
+if _app is not None:
+    # Happy path — real FastAPI app
+    handler = Mangum(_app, lifespan="off", api_gateway_base_path="/api")
+else:
+    # Fallback — return the import traceback as JSON so we can debug
+    from fastapi import FastAPI as _FastAPI
+    _fallback = _FastAPI()
+    _err_copy = _import_error
 
     @_fallback.get("/{path:path}")
-    async def _err():
-        return {"import_error": _tb}
+    async def _debug_error(path: str = ""):
+        return {"import_error": _err_copy}
 
-    from mangum import Mangum as _M
-    handler = _M(_fallback, lifespan="off", api_gateway_base_path="/api")
+    handler = Mangum(_fallback, lifespan="off", api_gateway_base_path="/api")
