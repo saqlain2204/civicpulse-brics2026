@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
 import MarkerClusterGroup from 'react-leaflet-cluster'
 import L from 'leaflet'
@@ -38,6 +38,17 @@ function makePinIcon(score) {
     iconAnchor: [size / 2, size / 2],
     popupAnchor:[0, -(size / 2 + 6)],
   })
+}
+
+/* ── Forces Leaflet to recalculate tile layout after a CSS display:none→block ── */
+function AutoInvalidate() {
+  const map = useMap()
+  useEffect(() => {
+    // Small delay lets the browser finish the CSS transition before measuring
+    const t = setTimeout(() => map.invalidateSize(), 120)
+    return () => clearTimeout(t)
+  }, [map])
+  return null
 }
 
 /* ── Heatmap layer (L.heatLayer is available after the static import above) ── */
@@ -114,6 +125,7 @@ export default function HeatMap({ points = [], showClusters = false, height = '5
         style={{ height: '100%', width: '100%' }}
         scrollWheelZoom>
 
+        <AutoInvalidate />
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'

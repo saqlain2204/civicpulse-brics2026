@@ -148,8 +148,8 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Map tab */}
-        {activeTab === 'map' && (
+        {/* Map tab — always mounted so Leaflet never loses its container */}
+        <div style={{ display: activeTab === 'map' ? 'block' : 'none' }}>
           <div className="space-y-3">
             <div className="flex items-center justify-between text-xs" style={{ color: 'var(--text-3)' }}>
               <span>Click any pin to see what was reported</span>
@@ -173,7 +173,7 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
-        )}
+        </div>
 
         {/* Analytics tab */}
         {activeTab === 'analytics' && (
