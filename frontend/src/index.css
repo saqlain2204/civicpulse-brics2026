@@ -1,10 +1,11 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
+/* CSS @imports MUST be first — before any @tailwind directives */
 @import 'leaflet/dist/leaflet.css';
 @import 'react-leaflet-cluster/dist/assets/MarkerCluster.css';
 @import 'react-leaflet-cluster/dist/assets/MarkerCluster.Default.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 /* ─── Design Tokens ─────────────────────────────────────── */
 :root {
