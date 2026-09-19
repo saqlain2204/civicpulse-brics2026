@@ -2,6 +2,7 @@ import json
 import os
 import re
 import tempfile
+import httpx
 from groq import Groq
 from config import GROQ_API_KEY, GROQ_MODEL, GROQ_FAST_MODEL, GROQ_WHISPER_MODEL, INFRASTRUCTURE_CATEGORIES
 from services.cache import (
@@ -10,7 +11,13 @@ from services.cache import (
     TTL_ANALYSIS, TTL_RECS, TTL_CHAT,
 )
 
-client = Groq(api_key=GROQ_API_KEY)
+# Explicit timeout + bounded pool — prevents hanging forever in serverless
+_http = httpx.Client(
+    timeout=httpx.Timeout(total=25.0, connect=8.0, read=20.0, write=8.0),
+    limits=httpx.Limits(max_connections=10, max_keepalive_connections=3),
+)
+
+client = Groq(api_key=GROQ_API_KEY, http_client=_http, max_retries=1)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
