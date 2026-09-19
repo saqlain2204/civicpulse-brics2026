@@ -1,30 +1,49 @@
 import json
 import os
+import re
 import tempfile
 from groq import Groq
 from config import GROQ_API_KEY, GROQ_MODEL, GROQ_FAST_MODEL, GROQ_WHISPER_MODEL, INFRASTRUCTURE_CATEGORIES
+from services.cache import (
+    get, set as cache_set,
+    analysis_key, recs_key, chat_key,
+    TTL_ANALYSIS, TTL_RECS, TTL_CHAT,
+)
 
 client = Groq(api_key=GROQ_API_KEY)
 
-LANG_NAMES = {
-    "en": "English", "hi": "Hindi", "pt": "Portuguese",
-    "ru": "Russian", "zh": "Chinese", "af": "Afrikaans",
-    "zu": "Zulu", "ta": "Tamil", "te": "Telugu", "bn": "Bengali",
-    "mr": "Marathi", "gu": "Gujarati", "ar": "Arabic"
-}
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _extract_json(text: str) -> dict:
+    """Robustly parse JSON from LLM output, handling markdown fences and leading text."""
+    text = text.strip()
+    text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.MULTILINE)
+    text = re.sub(r'\s*```$',          '', text, flags=re.MULTILINE)
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    match = re.search(r'\{[\s\S]*\}', text)
+    if match:
+        return json.loads(match.group(0))
+    raise ValueError(f"No valid JSON in LLM response: {text[:300]}")
+
+
+# ── Core LLM functions ────────────────────────────────────────────────────────
 
 async def analyze_feedback(text: str, language: str = "auto") -> dict:
-    """
-    Use Groq LLaMA to analyze citizen feedback:
-    - Detect language
-    - Translate to English
-    - Classify infrastructure category
-    - Sentiment analysis
-    - Urgency scoring (1-10)
-    - Extract keywords
-    """
-    categories_str = ", ".join(INFRASTRUCTURE_CATEGORIES)
+    """Detect language, translate, classify, score urgency — all in one LLM call."""
 
+    # ── Cache check ──
+    key = analysis_key(text)
+    cached = get(key)
+    if cached:
+        print("[CACHE HIT] analyze_feedback")
+        return cached
+
+    categories_str = ", ".join(INFRASTRUCTURE_CATEGORIES)
     prompt = f"""You are an AI analyst for a government infrastructure platform analyzing citizen feedback from BRICS nations.
 
 Analyze the following citizen feedback and return a JSON response.
@@ -51,56 +70,45 @@ Only return the JSON, no other text."""
         model=GROQ_MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.1,
-        max_tokens=500
+        max_tokens=500,
     )
+    result = _extract_json(response.choices[0].message.content)
 
-    result_text = response.choices[0].message.content
-    return _extract_json(result_text)
+    # ── Cache store ──
+    cache_set(key, result, TTL_ANALYSIS)
+    print("[CACHE MISS] analyze_feedback — stored")
+    return result
 
 
 async def transcribe_voice(audio_bytes: bytes, filename: str = "audio.wav") -> str:
-    """Transcribe audio using Groq Whisper"""
-    with tempfile.NamedTemporaryFile(suffix=os.path.splitext(filename)[1] or ".wav", delete=False) as f:
+    """Transcribe audio using Groq Whisper (not cached — audio is always unique)."""
+    with tempfile.NamedTemporaryFile(
+        suffix=os.path.splitext(filename)[1] or ".wav", delete=False
+    ) as f:
         f.write(audio_bytes)
         tmp_path = f.name
-
     try:
         with open(tmp_path, "rb") as audio_file:
             transcription = client.audio.transcriptions.create(
                 file=(filename, audio_file.read()),
                 model=GROQ_WHISPER_MODEL,
-                response_format="text"
+                response_format="text",
             )
         return transcription
     finally:
         os.unlink(tmp_path)
 
 
-def _extract_json(text: str) -> dict:
-    """Robustly extract JSON from LLM response, handling markdown fences and extra text."""
-    import re
-    text = text.strip()
-    # Remove markdown code fences
-    text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.MULTILINE)
-    text = re.sub(r'\s*```$', '', text, flags=re.MULTILINE)
-    text = text.strip()
-    # Try direct parse first
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    # Try to extract first {...} block
-    match = re.search(r'\{[\s\S]*\}', text)
-    if match:
-        return json.loads(match.group(0))
-    raise ValueError(f"No valid JSON found in response: {text[:300]}")
-
-
 async def generate_policy_recommendations(aggregated_data: dict) -> dict:
-    """
-    Generate AI-powered policy recommendations for policymakers
-    based on aggregated citizen feedback data
-    """
+    """Generate AI policy recommendations — cached 15 min since DB data changes slowly."""
+
+    # ── Cache check ──
+    key = recs_key(aggregated_data)
+    cached = get(key)
+    if cached:
+        print("[CACHE HIT] generate_policy_recommendations")
+        return cached
+
     prompt = f"""You are a senior policy advisor analyzing citizen feedback data from BRICS nations for a government infrastructure platform.
 
 Here is the aggregated citizen feedback data:
@@ -145,20 +153,31 @@ Provide exactly 5 priority recommendations. Be specific and data-driven."""
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2,
-                max_tokens=2000
+                max_tokens=2000,
             )
-            result_text = response.choices[0].message.content
-            if result_text and result_text.strip():
-                return _extract_json(result_text)
+            text = response.choices[0].message.content
+            if text and text.strip():
+                result = _extract_json(text)
+                # ── Cache store ──
+                cache_set(key, result, TTL_RECS)
+                print("[CACHE MISS] generate_policy_recommendations — stored")
+                return result
         except Exception as e:
             last_error = e
             print(f"[WARN] Model {model} failed: {e}")
-            continue
     raise last_error or ValueError("All models returned empty responses")
 
 
 async def chat_with_data(question: str, context: str) -> str:
-    """Conversational AI for policymakers to query the data"""
+    """Conversational AI — cached 5 min since the same question is often repeated."""
+
+    # ── Cache check ──
+    key = chat_key(question, context)
+    cached = get(key)
+    if cached:
+        print("[CACHE HIT] chat_with_data")
+        return cached
+
     prompt = f"""You are CivicPulse AI, an intelligent assistant for government policymakers analyzing BRICS infrastructure data.
 
 Current Data Context:
@@ -172,7 +191,11 @@ Provide a concise, insightful answer based on the data. Be specific and actionab
         model=GROQ_FAST_MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
-        max_tokens=400
+        max_tokens=400,
     )
+    result = response.choices[0].message.content.strip()
 
-    return response.choices[0].message.content.strip()
+    # ── Cache store ──
+    cache_set(key, result, TTL_CHAT)
+    print("[CACHE MISS] chat_with_data — stored")
+    return result
