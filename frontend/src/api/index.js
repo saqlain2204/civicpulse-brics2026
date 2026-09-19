@@ -1,7 +1,13 @@
 import axios from 'axios'
 
+// In production, VITE_API_BASE_URL = https://civicpulse-api.onrender.com
+// In local dev, Vite proxies /api → localhost:8000
+const BASE = import.meta.env.VITE_API_BASE_URL
+  ? `${import.meta.env.VITE_API_BASE_URL}/api`
+  : '/api'
+
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: BASE,
   timeout: 30000,
 })
 
