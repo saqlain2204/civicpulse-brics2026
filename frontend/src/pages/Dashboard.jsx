@@ -45,6 +45,10 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('overview')
   const [filterCountry, setFilterCountry] = useState('')
   const [minUrgency, setMinUrgency] = useState(1)
+  // Mount HeatMap only after the map tab is first visited — avoids Leaflet
+  // initialising inside a display:none container (zero dimensions → crash).
+  // Once mounted it stays alive so Leaflet never re-initialises on tab switch.
+  const [mapEverVisited, setMapEverVisited] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -66,6 +70,11 @@ export default function Dashboard() {
   }
 
   useEffect(() => { load() }, [filterCountry, minUrgency])
+
+  // Track first visit to map tab
+  useEffect(() => {
+    if (activeTab === 'map') setMapEverVisited(true)
+  }, [activeTab])
 
   const tabs = [
     { id: 'overview',  label: 'Overview' },
@@ -172,18 +181,21 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* ── Heatmap — always mounted, just hidden via CSS ── */}
+        {/* ── Heatmap — mounted on first visit, hidden via CSS afterwards ──
+             Never mount while display:none — Leaflet needs real dimensions. */}
         <div style={{ display: activeTab === 'map' ? 'block' : 'none' }}>
           <div className="space-y-3">
             <div className="flex items-center justify-between text-xs" style={{ color: 'var(--text-3)' }}>
               <span>Click any pin to see what was reported</span>
               <span>{hotspots.length} points shown</span>
             </div>
-            <MapErrorBoundary>
-              <Suspense fallback={<MapFallback />}>
-                <HeatMap points={hotspots} showClusters height="560px" />
-              </Suspense>
-            </MapErrorBoundary>
+            {mapEverVisited && (
+              <MapErrorBoundary>
+                <Suspense fallback={<MapFallback />}>
+                  <HeatMap points={hotspots} showClusters height="560px" />
+                </Suspense>
+              </MapErrorBoundary>
+            )}
             <div className="card p-4">
               <div className="flex flex-wrap gap-4 text-xs" style={{ color: 'var(--text-2)' }}>
                 <span className="font-medium">Pin urgency:</span>
