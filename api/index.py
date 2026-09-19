@@ -13,4 +13,6 @@ from main import app  # noqa: E402  (backend/main.py)
 
 # lifespan="auto" → Mangum runs startup/shutdown events if the ASGI server supports it.
 # This ensures connect_db() and seed_database() are called on cold starts.
-handler = Mangum(app, lifespan="auto")
+# api_gateway_base_path strips "/api" before passing the path to FastAPI.
+# e.g. Vercel receives GET /api/health → Mangum strips "/api" → FastAPI sees GET /health
+handler = Mangum(app, lifespan="auto", api_gateway_base_path="/api")
