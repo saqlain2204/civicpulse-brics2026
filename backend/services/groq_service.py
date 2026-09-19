@@ -13,7 +13,7 @@ from services.cache import (
 client = Groq(api_key=GROQ_API_KEY)
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _extract_json(text: str) -> dict:
     """Robustly parse JSON from LLM output, handling markdown fences and leading text."""
@@ -36,9 +36,8 @@ def _extract_json(text: str) -> dict:
 async def analyze_feedback(text: str, language: str = "auto") -> dict:
     """Detect language, translate, classify, score urgency — all in one LLM call."""
 
-    # ── Cache check ──
     key = analysis_key(text)
-    cached = get(key)
+    cached = await get(key)
     if cached:
         print("[CACHE HIT] analyze_feedback")
         return cached
@@ -74,9 +73,8 @@ Only return the JSON, no other text."""
     )
     result = _extract_json(response.choices[0].message.content)
 
-    # ── Cache store ──
-    cache_set(key, result, TTL_ANALYSIS)
-    print("[CACHE MISS] analyze_feedback — stored")
+    await cache_set(key, result, TTL_ANALYSIS, namespace="analysis")
+    print("[CACHE MISS] analyze_feedback — stored in MongoDB")
     return result
 
 
@@ -102,9 +100,8 @@ async def transcribe_voice(audio_bytes: bytes, filename: str = "audio.wav") -> s
 async def generate_policy_recommendations(aggregated_data: dict) -> dict:
     """Generate AI policy recommendations — cached 15 min since DB data changes slowly."""
 
-    # ── Cache check ──
     key = recs_key(aggregated_data)
-    cached = get(key)
+    cached = await get(key)
     if cached:
         print("[CACHE HIT] generate_policy_recommendations")
         return cached
@@ -158,9 +155,8 @@ Provide exactly 5 priority recommendations. Be specific and data-driven."""
             text = response.choices[0].message.content
             if text and text.strip():
                 result = _extract_json(text)
-                # ── Cache store ──
-                cache_set(key, result, TTL_RECS)
-                print("[CACHE MISS] generate_policy_recommendations — stored")
+                await cache_set(key, result, TTL_RECS, namespace="recs")
+                print("[CACHE MISS] generate_policy_recommendations — stored in MongoDB")
                 return result
         except Exception as e:
             last_error = e
@@ -171,9 +167,8 @@ Provide exactly 5 priority recommendations. Be specific and data-driven."""
 async def chat_with_data(question: str, context: str) -> str:
     """Conversational AI — cached 5 min since the same question is often repeated."""
 
-    # ── Cache check ──
     key = chat_key(question, context)
-    cached = get(key)
+    cached = await get(key)
     if cached:
         print("[CACHE HIT] chat_with_data")
         return cached
@@ -195,7 +190,6 @@ Provide a concise, insightful answer based on the data. Be specific and actionab
     )
     result = response.choices[0].message.content.strip()
 
-    # ── Cache store ──
-    cache_set(key, result, TTL_CHAT)
-    print("[CACHE MISS] chat_with_data — stored")
+    await cache_set(key, result, TTL_CHAT, namespace="chat")
+    print("[CACHE MISS] chat_with_data — stored in MongoDB")
     return result

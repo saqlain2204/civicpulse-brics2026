@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from database import get_db
 from services.groq_service import analyze_feedback, generate_policy_recommendations, chat_with_data
-from services.cache import stats as cache_stats, invalidate_prefix
+from services.cache import stats as cache_stats, invalidate_prefix, ensure_index
 import json
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
@@ -106,14 +106,14 @@ async def get_recommendations():
 
 @router.get("/cache/stats")
 async def get_cache_stats():
-    """See how many LLM responses are cached right now."""
-    return {"success": True, "cache": cache_stats()}
+    """See how many LLM responses are cached in MongoDB right now."""
+    return {"success": True, "cache": await cache_stats()}
 
 
 @router.delete("/cache/recommendations")
 async def bust_recs_cache():
     """Force-invalidate the recommendations cache (useful after bulk data import)."""
-    removed = invalidate_prefix("recs")
+    removed = await invalidate_prefix("recs")
     return {"success": True, "removed": removed}
 
 

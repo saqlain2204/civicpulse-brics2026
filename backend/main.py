@@ -5,12 +5,14 @@ from contextlib import asynccontextmanager
 from database import connect_db, close_db, get_db
 from routes import feedback, analytics, ai
 from services.seed_service import seed_database
+from services.cache import ensure_index as ensure_cache_index
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await connect_db()
     db = get_db()
+    await ensure_cache_index()   # Create TTL index on llm_cache collection
     await seed_database(db)
     yield
     await close_db()
