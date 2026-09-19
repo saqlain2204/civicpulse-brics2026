@@ -5,14 +5,14 @@ Wraps the FastAPI app with Mangum so Vercel can invoke it as a Lambda-style hand
 import sys
 import os
 
-# Add the backend package to the module search path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend'))
+# Resolve backend path robustly regardless of Vercel's working directory
+_here = os.path.dirname(os.path.abspath(__file__))
+_backend = os.path.join(_here, '..', 'backend')
+sys.path.insert(0, os.path.abspath(_backend))
 
-from mangum import Mangum
-from main import app  # noqa: E402  (backend/main.py)
+from mangum import Mangum          # noqa: E402
+from main import app               # noqa: E402  (backend/main.py)
 
-# lifespan="auto" → Mangum runs startup/shutdown events if the ASGI server supports it.
-# This ensures connect_db() and seed_database() are called on cold starts.
 # api_gateway_base_path strips "/api" before passing the path to FastAPI.
 # e.g. Vercel receives GET /api/health → Mangum strips "/api" → FastAPI sees GET /health
 handler = Mangum(app, lifespan="auto", api_gateway_base_path="/api")

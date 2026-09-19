@@ -4,11 +4,12 @@ MongoDB connection — works in both traditional (uvicorn) and serverless (Verce
 The client is created at module level so it is reused across warm invocations,
 which is the recommended pattern for serverless + Motor/PyMongo.
 """
+from typing import Optional
 from motor.motor_asyncio import AsyncIOMotorClient
 from config import MONGO_URI, MONGO_DB
 
 # Module-level singleton — created once per container / warm invocation
-_client: AsyncIOMotorClient | None = None
+_client: Optional[AsyncIOMotorClient] = None
 _db = None
 
 
@@ -18,8 +19,11 @@ def get_db():
     if _client is None:
         _client = AsyncIOMotorClient(
             MONGO_URI,
-            serverSelectionTimeoutMS=8000,
-            connectTimeoutMS=8000,
+            serverSelectionTimeoutMS=10000,
+            connectTimeoutMS=10000,
+            socketTimeoutMS=20000,
+            tls=True,
+            tlsAllowInvalidCertificates=False,
         )
         _db = _client[MONGO_DB]
     return _db
