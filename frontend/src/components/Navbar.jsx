@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { FiActivity, FiMap, FiMessageSquare, FiBarChart2, FiMenu, FiX, FiSun, FiMoon } from 'react-icons/fi'
+import { FiActivity, FiMap, FiMessageSquare, FiBarChart2, FiMenu, FiX, FiSun, FiMoon, FiLogOut } from 'react-icons/fi'
 import { useTheme } from '../contexts/ThemeContext'
+import { useAuth } from '../contexts/AuthContext'
 
 const navLinks = [
   { path: '/',          label: 'Home',            icon: FiActivity },
@@ -14,6 +15,7 @@ export default function Navbar() {
   const location = useLocation()
   const [open, setOpen] = useState(false)
   const { isDark, toggleTheme } = useTheme()
+  const { logout } = useAuth()
 
   return (
     <nav style={{ background: 'var(--bg)', borderBottom: '1px solid var(--border)' }}
@@ -57,6 +59,14 @@ export default function Navbar() {
               style={{ background: 'var(--bg-hover)', color: 'var(--text-2)' }}
               title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}>
               {isDark ? <FiSun size={15} /> : <FiMoon size={15} />}
+            </button>
+
+            {/* Logout button */}
+            <button onClick={logout}
+              className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors"
+              style={{ background: 'var(--bg-hover)', color: 'var(--text-2)' }}
+              title="Sign out">
+              <FiLogOut size={15} />
             </button>
 
             {/* Status badge */}
