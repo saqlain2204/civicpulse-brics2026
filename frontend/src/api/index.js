@@ -25,10 +25,13 @@ export const getHotspots = (params) => api.get('/analytics/hotspots', { params }
 export const getCategoryBreakdown = (country) => api.get('/analytics/categories', { params: { country } })
 export const getCountryComparison = () => api.get('/analytics/countries')
 export const getTimeline = () => api.get('/analytics/timeline')
+export const getNationalData = (country) => api.get('/analytics/national-data', { params: { country } })
+export const getSdgAlignment = () => api.get('/analytics/sdg-alignment')
+export const getPriorityMatrix = (country) => api.get('/analytics/priority-matrix', { params: { country } })
 
 // AI API
 export const analyzeText = (text, language = 'auto') => api.post('/ai/analyze', { text, language })
-export const getRecommendations = () => api.get('/ai/recommendations')
+export const getRecommendations = (country) => api.get('/ai/recommendations', { params: { country } })
 export const chatWithAI = (question) => api.post('/ai/chat', { question })
 
 export default api

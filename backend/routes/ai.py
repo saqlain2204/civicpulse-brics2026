@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from database import get_db
 from services.groq_service import analyze_feedback, generate_policy_recommendations, chat_with_data
 from services.cache import stats as cache_stats, invalidate_prefix, ensure_index
+from services.national_data_service import format_national_context_for_llm
 import json
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
@@ -28,16 +29,21 @@ async def analyze_text(req: AnalyzeRequest):
 
 
 @router.get("/recommendations")
-async def get_recommendations():
-    """Generate AI-powered policy recommendations from aggregated data"""
+async def get_recommendations(country: str = None):
+    """Generate AI-powered policy recommendations cross-referenced with national data"""
     db = get_db()
+    match_filter = {"location.country": country} if country else {}
 
     # Aggregate data for AI context
-    total = await db.feedback.count_documents({})
-    critical_count = await db.feedback.count_documents({"urgency_score": {"$gte": 8}})
+    total = await db.feedback.count_documents(match_filter)
+    crit_filter = {"urgency_score": {"$gte": 8}}
+    if country:
+        crit_filter["location.country"] = country
+    critical_count = await db.feedback.count_documents(crit_filter)
 
     # Category counts
     cat_pipeline = [
+        {"$match": match_filter} if match_filter else {"$match": {}},
         {"$group": {"_id": "$category", "count": {"$sum": 1}, "avg_urgency": {"$avg": "$urgency_score"}}},
         {"$sort": {"count": -1}}, {"$limit": 10}
     ]
@@ -48,6 +54,7 @@ async def get_recommendations():
 
     # Country counts
     country_pipeline = [
+        {"$match": match_filter} if match_filter else {"$match": {}},
         {"$group": {"_id": "$location.country", "count": {"$sum": 1}, "avg_urgency": {"$avg": "$urgency_score"}}},
         {"$sort": {"count": -1}}
     ]
@@ -58,6 +65,7 @@ async def get_recommendations():
 
     # Urgency by category
     urgency_pipeline = [
+        {"$match": match_filter} if match_filter else {"$match": {}},
         {"$group": {"_id": "$category", "avg_urgency": {"$avg": "$urgency_score"}}},
         {"$sort": {"avg_urgency": -1}}, {"$limit": 5}
     ]
@@ -68,6 +76,7 @@ async def get_recommendations():
 
     # Top hotspot cities
     city_pipeline = [
+        {"$match": match_filter} if match_filter else {"$match": {}},
         {"$group": {
             "_id": {"city": "$location.city", "country": "$location.country"},
             "count": {"$sum": 1},
@@ -96,8 +105,8 @@ async def get_recommendations():
     }
 
     try:
-        recommendations = await generate_policy_recommendations(aggregated_data)
-        return {"success": True, "data": recommendations, "based_on": total}
+        recommendations = await generate_policy_recommendations(aggregated_data, country=country)
+        return {"success": True, "data": recommendations, "based_on": total, "country": country or "All BRICS"}
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -119,7 +128,7 @@ async def bust_recs_cache():
 
 @router.post("/chat")
 async def ai_chat(req: ChatRequest):
-    """Conversational AI for policymakers"""
+    """Conversational AI for policymakers grounded in citizen feedback + national indicators"""
     db = get_db()
 
     # Build context summary
@@ -135,9 +144,13 @@ async def ai_chat(req: ChatRequest):
         if doc["_id"]:
             top_cats.append(f"{doc['_id']}: {doc['count']}")
 
-    context = f"""Total feedback: {total}. Critical issues (urgency >= 8): {critical}.
-Top categories: {', '.join(top_cats)}.
-Platform covers BRICS nations: India, Brazil, Russia, China, South Africa."""
+    national_summary = format_national_context_for_llm()
+
+    context = f"""Citizen Submissions: Total: {total}. Critical issues (urgency >= 8): {critical}.
+Top citizen demand categories: {', '.join(top_cats)}.
+
+National Baseline Context (Demographics, Infrastructure Indices, Flagship Plans):
+{national_summary}"""
 
     try:
         answer = await chat_with_data(req.question, context)

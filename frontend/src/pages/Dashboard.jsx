@@ -3,6 +3,8 @@ import { FiUsers, FiAlertTriangle, FiCheckCircle, FiTrendingUp, FiRefreshCw } fr
 import { getDashboardStats, getHotspots, getCategoryBreakdown, getCountryComparison } from '../api'
 import { CategoryBarChart, UrgencyPieChart, CountryRadarChart } from '../components/charts/CategoryChart'
 import AIRecommendations from '../components/AIRecommendations'
+import NationalDataView from '../components/NationalDataView'
+import SdgAlignmentView from '../components/SdgAlignmentView'
 import MapErrorBoundary from '../components/MapErrorBoundary'
 
 // Lazy-load the map so a Leaflet crash never breaks the whole Dashboard
@@ -79,8 +81,10 @@ export default function Dashboard() {
   const tabs = [
     { id: 'overview',  label: 'Overview' },
     { id: 'map',       label: 'Heatmap' },
-    { id: 'analytics', label: 'Analytics' },
-    { id: 'ai',        label: 'AI Insights' },
+    { id: 'national',  label: 'National Baselines' },
+    { id: 'sdg',       label: 'SDG & Priority Matrix' },
+    { id: 'analytics', label: 'Cross-Nation Analytics' },
+    { id: 'ai',        label: 'AI Policy Recommendations' },
   ]
 
   return (
@@ -215,6 +219,16 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* ── National Baselines ── */}
+        {activeTab === 'national' && (
+          <NationalDataView defaultCountry={filterCountry} />
+        )}
+
+        {/* ── SDG & Priority Matrix ── */}
+        {activeTab === 'sdg' && (
+          <SdgAlignmentView filterCountry={filterCountry} />
+        )}
+
         {/* ── Analytics ── */}
         {activeTab === 'analytics' && (
           <div className="space-y-4">
@@ -255,7 +269,7 @@ export default function Dashboard() {
         )}
 
         {/* ── AI Insights ── */}
-        {activeTab === 'ai' && <AIRecommendations />}
+        {activeTab === 'ai' && <AIRecommendations filterCountry={filterCountry} />}
 
       </div>
     </div>
