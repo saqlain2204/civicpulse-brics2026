@@ -1,5 +1,13 @@
 from fastapi import APIRouter
 from database import get_db
+from services.national_data_service import (
+    get_all_national_data,
+    get_national_data_for_country,
+    get_sdg_mapping,
+    calculate_priority_score,
+    BRICS_NATIONAL_DATA,
+    SDG_CATEGORY_MAPPING
+)
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
@@ -223,3 +231,162 @@ async def get_submission_timeline():
         })
 
     return {"data": timeline}
+
+
+@router.get("/national-data")
+async def get_national_data(country: str = None):
+    """
+    Return demographic data, infrastructure indices, and public investment plans.
+    Zero-database footprint: served in-memory for fast access.
+    """
+    if country:
+        data = get_national_data_for_country(country)
+        if not data:
+            return {"country": country, "data": None, "available_countries": list(BRICS_NATIONAL_DATA.keys())}
+        return {"country": country, "data": data}
+    return {"countries": get_all_national_data()}
+
+
+@router.get("/sdg-alignment")
+async def get_sdg_alignment():
+    """
+    Calculate real-time SDG mapping, coverage, and urgency metrics across submitted citizen requests.
+    """
+    db = get_db()
+    cat_pipeline = [
+        {"$group": {
+            "_id": "$category",
+            "total": {"$sum": 1},
+            "avg_urgency": {"$avg": "$urgency_score"},
+            "critical": {"$sum": {"$cond": [{"$gte": ["$urgency_score", 8]}, 1, 0]}}
+        }}
+    ]
+
+    sdg_stats = {}
+    total_submissions = 0
+
+    async for doc in db.feedback.aggregate(cat_pipeline):
+        cat = doc["_id"]
+        if not cat:
+            continue
+        total_submissions += doc["total"]
+        mapping = SDG_CATEGORY_MAPPING.get(cat, {
+            "sdgs": [9],
+            "sdg_names": ["SDG 9: Industry, Innovation & Infrastructure"],
+            "target": "General infrastructure resilience"
+        })
+
+        for sdg_num, sdg_name in zip(mapping["sdgs"], mapping["sdg_names"]):
+            key = f"SDG_{sdg_num}"
+            if key not in sdg_stats:
+                sdg_stats[key] = {
+                    "sdg": sdg_num,
+                    "name": sdg_name,
+                    "target": mapping["target"],
+                    "categories": [],
+                    "total_issues": 0,
+                    "critical_issues": 0,
+                    "urgency_scores": []
+                }
+            sdg_stats[key]["categories"].append(cat)
+            sdg_stats[key]["total_issues"] += doc["total"]
+            sdg_stats[key]["critical_issues"] += doc["critical"]
+            sdg_stats[key]["urgency_scores"].append(doc["avg_urgency"])
+
+    # Aggregate urgency averages and format response
+    result_list = []
+    for k, v in sdg_stats.items():
+        avg_urg = sum(v["urgency_scores"]) / len(v["urgency_scores"]) if v["urgency_scores"] else 0
+        result_list.append({
+            "sdg_code": k,
+            "sdg": v["sdg"],
+            "name": v["name"],
+            "target": v["target"],
+            "categories": list(set(v["categories"])),
+            "total_issues": v["total_issues"],
+            "critical_issues": v["critical_issues"],
+            "avg_urgency": round(avg_urg, 1),
+            "share_pct": round((v["total_issues"] / total_submissions * 100) if total_submissions else 0, 1)
+        })
+
+    # Sort by total issues descending
+    result_list.sort(key=lambda x: x["total_issues"], reverse=True)
+
+    return {
+        "total_mapped_submissions": total_submissions,
+        "sdg_coverage_count": len(result_list),
+        "sdgs": result_list
+    }
+
+
+@router.get("/priority-matrix")
+async def get_priority_matrix(country: str = None):
+    """
+    Computes a cross-referenced Priority Deficit Score combining:
+    1. Citizen complaint volume & urgency
+    2. National infrastructure baseline index (0-100)
+    3. Public investment plan CapEx budget allocation
+    """
+    db = get_db()
+    match = {}
+    if country:
+        match["location.country"] = country
+
+    pipeline = [
+        {"$match": match} if match else {"$match": {}},
+        {"$group": {
+            "_id": {
+                "country": "$location.country",
+                "category": "$category"
+            },
+            "count": {"$sum": 1},
+            "avg_urgency": {"$avg": "$urgency_score"},
+            "critical_count": {"$sum": {"$cond": [{"$gte": ["$urgency_score", 8]}, 1, 0]}}
+        }},
+        {"$sort": {"count": -1}}
+    ]
+
+    matrix_entries = []
+    async for doc in db.feedback.aggregate(pipeline):
+        c_country = doc["_id"]["country"]
+        c_category = doc["_id"]["category"]
+        if not c_country or not c_category:
+            continue
+
+        c_data = BRICS_NATIONAL_DATA.get(c_country)
+        if not c_data:
+            continue
+
+        infra_index = c_data["infrastructure_indices"].get(c_category, 50)
+        sector_budget = c_data["public_investment_plans"]["sector_budgets_usd_bn"].get(c_category, 5.0)
+
+        calc = calculate_priority_score(
+            demand_count=doc["count"],
+            avg_urgency=doc["avg_urgency"],
+            infra_index=infra_index,
+            sector_budget_bn=sector_budget
+        )
+
+        matrix_entries.append({
+            "country": c_country,
+            "category": c_category,
+            "citizen_demand_count": doc["count"],
+            "critical_count": doc["critical_count"],
+            "avg_urgency": round(doc["avg_urgency"], 1),
+            "infrastructure_baseline_index": infra_index,
+            "deficit_factor": calc["deficit_index"],
+            "annual_budget_usd_bn": sector_budget,
+            "priority_score": calc["score"],
+            "priority_tier": calc["tier"],
+            "sdg": SDG_CATEGORY_MAPPING.get(c_category, {}).get("sdg_names", ["SDG 9"])[0]
+        })
+
+    # Sort primarily by priority_score descending
+    matrix_entries.sort(key=lambda x: x["priority_score"], reverse=True)
+
+    return {
+        "total_scored_projects": len(matrix_entries),
+        "critical_count": sum(1 for m in matrix_entries if "Critical" in m["priority_tier"]),
+        "projects": matrix_entries
+    }
+
